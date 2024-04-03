@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Geocoding with Query</title>
+  <script src="https://api.mapbox.com/mapbox-gl-js/v3.3.1/mapbox-gl.js"></script>
+  <link href="https://api.mapbox.com/mapbox-gl-js/v3.3.1/mapbox-gl.css" rel="stylesheet">
+  <style>
+    body { margin: 0; padding: 0; }
+    #map { position: absolute; top: 0; bottom: 0; width: 100%; }
+  </style>
+</head>
+<body>
+
+<div id="map"></div>
+
+<script>
+  mapboxgl.accessToken = 'pk.eyJ1IjoibWlrYXZ5YXMiLCJhIjoiY2xoczhjcDR1MGZqMzNjcW1scm1paTRpNyJ9.yYDAti9jKKB23RGPg8SeRA';
+
+  const map = new mapboxgl.Map({
+    container: 'map',
+    style: 'mapbox://styles/mapbox/streets-v12',
+    center: [-79.39390704282365, 43.70777081498133],
+    zoom: 9.8
+  });
+
+  // Zoom controls
+  map.addControl(new mapboxgl.NavigationControl(), 'top-left');
+
+  // Full screen control
+  map.addControl(new mapboxgl.FullscreenControl(), 'top-left');
+
+  map.on('load', () => {
+    const geocoder = new MapboxGeocoder({
+      accessToken: mapboxgl.accessToken,
+      mapboxgl: mapboxgl,
+      zoom: 13,
+      placeholder: 'Enter an address or place name',
+      countries: 'ca',
+      bbox: [-79.6393, 43.5806, -79.115, 43.8555] // Toronto bounding box
+    });
+
+    map.addControl(geocoder, 'top-left');
+
+    const marker = new mapboxgl.Marker({
+      'color': '#008000'
+    });
+
+    map.on('style.load', () => {
+      // Event listener for geocoder result
+      geocoder.on('result', async (event) => {
+        const point = event.result.center;
+        const radius = 50;
+        const limit = 50;
+        marker.setLngLat(point).addTo(map);
+        const tilesets = [
+          { id: 'mikavyas.8uok9jtd', name: 'Healthcare Facilities' },
+          { id: 'mikavyas.9sxcmo4f', name: 'Schools' },
+          { id: 'mikavyas.1f1ipcqq', name: 'Subways' }
+        ];
+        for (const tileset of tilesets) {
+          const query = await fetch(
+            `https://api.mapbox.com/v4/${tileset.id}/tilequery/${point[0]},${point[1]}.json?radius=${radius}&limit=${limit}&access_token=${mapboxgl.accessToken}`,
+            { method: 'GET' }
+          );
+          const json = await query.json();
+          map.addSource(`tilequery-${tileset.name}`, {
+            type: 'geojson',
+            data: json
+          });
+
+          // Add the layer to the map
+          map.addLayer({
+            id: `tilequery-points-${tileset.name}`,
+            type: 'circle',
+            source: `tilequery-${tileset.name}`,
+            paint: {
+              'circle-stroke-color': 'white',
+              'circle-stroke-width': {
+                stops: [
+                  [0, 0.1],
+                  [18, 3]
+                ],
+                base: 5
+              },
+              'circle-radius': {
+                stops: [
+                  [12, 5],
+                  [22, 180]
+                ],
+                base: 5
+              },
+              'circle-color': '#FF0000' // default color for other store types
+            }
+          });
+
+          const popup = new mapboxgl.Popup();
+
+          map.on('mouseenter', `tilequery-points-${tileset.name}`, (event) => {
+            map.getCanvas().style.cursor = 'pointer';
+            const properties = event.features[0].properties;
+            const obj = JSON.parse(properties.tilequery);
+            const coordinates = new mapboxgl.LngLat(
+              properties.longitude,
+              properties.latitude
+            );
+
+            const content = `<h3>${properties.STORE_NAME}</h3><h4>${properties.STORE_TYPE}</h4><p>${properties.ADDRESS_LINE1}</p><p>${(obj.distance / 1609.344).toFixed(2)} mi. from location</p>`;
+
+            popup.setLngLat(coordinates).setHTML(content).addTo(map);
+          });
+
+          map.on('mouseleave', `tilequery-points-${tileset.name}`, () => {
+            map.getCanvas().style.cursor = '';
+            popup.remove();
+          });
+        }
+      });
+    });
+  });
+
+</script>
+
+</body>
+</html>
